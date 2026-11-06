@@ -1,0 +1,9 @@
+[project]
+name = "blockattend-hosted-preview"
+version = "0.1.0"
+description = "Safe browser-only hosted demo for the separate full local BlockAttend project"
+requires-python = ">=3.12,<3.15"
+dependencies = ["fastapi>=0.115,<1"]
+
+[tool.vercel]
+entrypoint = "cloud_entry:app"

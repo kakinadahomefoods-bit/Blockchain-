@@ -1,12 +1,17 @@
-"""Run the local classroom server: python app.py"""
-import sys
-from app.config import env, require_secret
+"""Entry point for Vercel and the original local classroom application.
+
+Vercel imports the ASGI variable `app`; `python app.py` keeps launching the
+complete local server without pretending its SQLite/Ganache state is cloud-safe.
+"""
+from cloud_entry import app
+
 if __name__ == '__main__':
+    import sys
+    from app.config import env, require_secret
     try:
         require_secret('ADMIN_PASSWORD')
         require_secret('HMAC_KEY')
-    except RuntimeError as e:
-        sys.exit(str(e))
+    except RuntimeError as exc:
+        sys.exit(str(exc))
     import uvicorn
-    # Bind to localhost by default. Camera API is allowed on secure origins/localhost.
-    uvicorn.run('app.main:app', host='127.0.0.1', port=int(env('PORT','8000')), reload=False)
+    uvicorn.run('app.main:app', host='127.0.0.1', port=int(env('PORT', '8000')), reload=False)
