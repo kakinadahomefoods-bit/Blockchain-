@@ -1,0 +1,21 @@
+BlockAttend local acceptance test results
+=====================================
+Environment: Python 3.13 on Linux, JavaScript Node.js 22 syntax checker.
+Python suite: 12 tests passed (python -m pytest -q).
+JS frontend: node --check static/app.js passed.
+Python syntax: compileall app scripts passed.
+Fresh-process HTTP smoke test: PASSED.
+- Generated faculty password on first run and loaded it successfully
+- Authenticated faculty over loopback HTTP
+- Enrolled a manual-only student
+- Created a new blockchain-backed class session
+- Recorded faculty override with block # and transaction hash
+- Duplicate attendance rejected with HTTP 409
+- Ledger integrity verified and CSV exported
+
+NOT TESTED IN THIS ENVIRONMENT:
+- Microsoft Windows PowerShell/winget first-run bootstrap
+- Solidity compile, Ganache startup and contract transactions
+- Live laptop webcam and real multi-student recognition accuracy
+These are runtime checks for the user's local computer.
+The project includes source and startup scripts, not an EXE.

@@ -1,0 +1,40 @@
+BLOCKATTEND - BLOCKCHAIN SMART ATTENDANCE WITH FACE RECOGNITION
+===============================================================
+
+WINDOWS - START THE REAL SOLIDITY MINI PROJECT
+----------------------------------------------
+1. Extract the whole ZIP to a folder, e.g. Desktop\BlockAttend.
+2. Be connected to the internet ON THE FIRST RUN to install free tools.
+3. Double-click: START_PROJECT_WINDOWS.bat
+4. The launcher checks for Python 3.11-3.13 and Node.js LTS. It may ask
+   Windows Package Manager (winget) to install missing tools.
+5. Let it install packages and start the local Ganache blockchain.
+6. Save the randomly-generated FACULTY PASSWORD in data/login-info.txt.
+7. Your browser will open http://127.0.0.1:8000 automatically.
+8. Log in, register consenting volunteers, create a session, mark
+   attendance and inspect blockchain events/reports.
+9. Next time just double-click START_PROJECT_WINDOWS.bat again.
+
+IMPORTANT: This is a FULL SOURCE PROJECT with a first-run setup launcher,
+not a standalone EXE. Initial packages must be installed; no website, API
+key or paid cloud service is needed. A real camera must be tested on your
+own computer. We cannot pretest your Windows laptop from this environment.
+
+FASTER ALTERNATIVE - IF YOU DO NOT WANT NODE/GANACHE
+---------------------------------------------------
+Double-click START_OFFLINE_DEMO_WINDOWS.bat
+This is a signed SINGLE NODE teaching chain, NOT a decentralized EVM.
+Use START_PROJECT_WINDOWS.bat when your teacher expects real Solidity.
+
+DATA AND PRIVACY
+----------------
+- data/local and data/evm store SEPARATE student profiles for each mode.
+- Faces and names stay in private SQLite; chain stores pseudonymous tokens.
+- Student consent is required. Use test/volunteer data, not real students'
+  face biometrics without permission. Never upload the data folder.
+- Do NOT delete .env, data/evm/ganache_db, or the blockchain database;
+  losing them can make earlier attendance unverifiable.
+- This is a mini-project prototype; it does not detect photo spoofing.
+
+On macOS/Linux: read README.md for manual Python, Node and npm commands.
+Full source code: app/, static/, contracts/, scripts/ and tests/.

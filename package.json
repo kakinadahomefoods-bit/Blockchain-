@@ -1,0 +1,14 @@
+{
+  "name": "blockchain-attendance-demo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Optional local EVM mode (Ganache and Solidity compiler)",
+  "scripts": {
+    "chain": "ganache --wallet.deterministic --chain.chainId 1337 --server.host 127.0.0.1 --server.port 8545",
+    "compile": "python scripts/compile_contract.py"
+  },
+  "devDependencies": {
+    "ganache": "^7.9.2",
+    "solc": "^0.8.26"
+  }
+}
