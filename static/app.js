@@ -33,7 +33,7 @@ $('mobileMenu').addEventListener('click',()=>$('appShell').querySelector('.sideb
 function navigate(page){
   currentPage=page;document.querySelectorAll('.page').forEach(el=>el.classList.toggle('hidden',el.id!==`page-${page}`));
   document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
-  $('pageLabel').textContent=({dashboard:'Overview',enrol:'Student enrolment',scan:'Scan attendance',reports:'Reports',ledger:'Blockchain explorer',about:'How it works'})[page]||page;
+  $('pageLabel').textContent=({dashboard:'Overview',enrol:'Student enrolment',scan:'Take attendance LIVE',reports:'Reports',ledger:'Blockchain explorer',about:'How it works'})[page]||page;
   $('appShell').querySelector('.sidebar').classList.remove('open');
   if(stream && (page!=='enrol' && page!=='scan'))stopCamera();
   if(stream && currentCamera && currentCamera!==page)stopCamera();
@@ -92,10 +92,44 @@ $('manualOnlyEnrol').onclick=()=>run(async()=>{
   toast('Student added without biometrics. Only manual faculty marks are available.');
 });
 $('enrolForm').addEventListener('submit',e=>{e.preventDefault();run(async()=>{if(samples.length<3)throw Error('Capture at least three distinct face photos');const payload={name:$('studentName').value,roll:$('studentRoll').value,photos:samples,consent:$('studentConsent').checked};await api('/api/students','POST',payload);samples=[];updateSamples();$('enrolForm').reset();await loadStudents();toast('Student registered. Biometric templates saved off-chain.');});});
+
+async function loadRoster(){
+  const sessionId=$('sessionSelect').value;
+  const clear=(message)=>{
+    for(const key of ['rosterTotal','rosterPresent','rosterRemaining'])$(key).textContent='0';
+    $('rosterCoverage').textContent='0%';
+    $('rosterProgress').style.width='0%';
+    $('rosterNotice').textContent=message;
+    $('classroomRoster').innerHTML='<tr><td colspan="6">'+escapeHTML(message)+'</td></tr>';
+  };
+  if(!sessionId){clear('Create or select an open class session to begin taking attendance.');return;}
+  const data=await api('/api/sessions/'+q(sessionId)+'/roster');
+  $('rosterTotal').textContent=data.total;
+  $('rosterPresent').textContent=data.present;
+  $('rosterRemaining').textContent=data.remaining;
+  $('rosterCoverage').textContent=data.coverage_percent+'%';
+  $('rosterProgress').style.width=data.coverage_percent+'%';
+  $('rosterNotice').textContent=data.session.closed_at?'This session is closed. Records are read-only.':'Class open. Scan a face or use a documented manual override.';
+  $('classroomRoster').innerHTML=data.students.length?data.students.map(student=>{
+    const status=student.status==='present'?'<span class="tag">PRESENT</span>':student.status==='flagged'?'<span class="tag flagged">FLAGGED</span>':student.status==='pending'?'<span class="tag muted-tag">PENDING</span>':'<span class="tag muted-tag">NOT MARKED</span>';
+    const proof=student.tx_hash?'<code title="'+escapeHTML(student.tx_hash)+'">Block #'+escapeHTML(student.block_number)+' · '+escapeHTML(short(student.tx_hash,13))+'</code>':'—';
+    const action=student.status==='pending'?'<button class="secondary-btn small" data-roster-manual="'+escapeHTML(student.id)+'">Manual mark</button>':'—';
+    return '<tr><td><strong>'+escapeHTML(student.name)+'</strong><br><small>'+escapeHTML(student.roll)+'</small></td><td>'+(student.biometric_enrolled?'Yes':'Manual only')+'</td><td>'+status+'</td><td>'+escapeHTML(student.method||'—')+'</td><td>'+proof+'</td><td>'+action+'</td></tr>';
+  }).join(''):'<tr><td colspan="6">No students yet. Go to Student enrolment to add one.</td></tr>';
+  document.querySelectorAll('[data-roster-manual]').forEach(btn=>btn.onclick=()=>{
+    $('manualStudent').value=btn.dataset.rosterManual;
+    $('manualReason').value='Identity checked by supervising faculty';
+    $('manualReason').focus();
+    $('manualReason').scrollIntoView({behavior:'smooth',block:'center'});
+    toast('Confirm the reason and click “Mark present manually · audited”.');
+  });
+}
 async function loadSessionMenus(){
   const sessions=await api('/api/sessions');const open=sessions.filter(x=>!x.closed_at);
   await loadStudents();const prev=$('sessionSelect').value;$('sessionSelect').innerHTML='<option value="">Choose active session</option>'+open.map(s=>`<option value="${escapeHTML(s.id)}">${escapeHTML(s.title)} · ${escapeHTML(s.course)}</option>`).join('');
   if(open.some(s=>s.id===prev))$('sessionSelect').value=prev;
+  else if(open.length)$('sessionSelect').value=open[0].id;
+  await loadRoster();
 }
 $('openSessionModal').onclick=()=>{$('sessionTitle').focus();$('sessionTitle').scrollIntoView({behavior:'smooth',block:'center'})};
 $('createSession').onclick=()=>run(async()=>{const payload={title:$('sessionTitle').value,course:$('sessionCourse').value};const x=await api('/api/sessions','POST',payload);$('sessionTitle').value='';$('sessionCourse').value='';await loadSessionMenus();$('sessionSelect').value=x.id;toast('Class session created on blockchain');});
@@ -108,8 +142,10 @@ $('manualMark').onclick=()=>run(async()=>{const id=$('sessionSelect').value;
   if(!confirm('Record a faculty override WITHOUT biometric verification? It will be visible in reports and on the ledger.'))return;
   const result=await api(`/api/sessions/${q(id)}/manual`,'POST',{student_id,reason});
   scanMessage({title:`Faculty override: ${result.student.name}`,body:`Recorded in block #${result.receipt.block_number} (not face-verified).`},true);
-  $('manualReason').value='';toast('Faculty override recorded transparently on-chain');
+  $('manualReason').value='';toast('Faculty override recorded transparently on-chain');await loadRoster();
 });
+$('sessionSelect').onchange=()=>run(loadRoster);
+$('refreshRoster').onclick=()=>run(loadRoster);
 $('scanCamera').onclick=()=>run(()=>startCamera('scan'));
 $('scanUpload').onchange=e=>run(async()=>{if(!e.target.files.length)return;scanPhoto=await fileToData(e.target.files[0]);$('scanCamNotice').textContent=`Selected: ${e.target.files[0].name}. Use Check face or Scan & mark.`;toast('Photo selected');e.target.value='';});
 function scanData(){return currentCamera==='scan'&&stream?capture('scan'):scanPhoto;}
@@ -118,7 +154,7 @@ $('previewScan').onclick=()=>run(async()=>{const photo=scanData();if(!photo)thro
   if(result.recognized)scanMessage({title:`Recognized: ${result.student.name} (${result.student.roll})`,body:`LBP distance: ${result.distance}. Attendance not marked yet.`},true);
   else scanMessage({title:'Not recognized',body:result.message},false);
 });
-$('markScan').onclick=()=>run(async()=>{const id=$('sessionSelect').value;if(!id)throw Error('Create or select a class session first');const photo=scanData();if(!photo)throw Error('Enable the camera or upload a photo');const result=await api(`/api/sessions/${q(id)}/mark`,'POST',{photo});scanMessage({title:`Marked present: ${result.student.name} (${result.student.roll})`,body:`Block #${result.receipt.block_number} · Transaction ${short(result.receipt.tx_hash,24)}`},true);toast('Attendance recorded on blockchain ✓');});
+$('markScan').onclick=()=>run(async()=>{const id=$('sessionSelect').value;if(!id)throw Error('Create or select a class session first');const photo=scanData();if(!photo)throw Error('Enable the camera or upload a photo');const result=await api(`/api/sessions/${q(id)}/mark`,'POST',{photo});scanMessage({title:`Marked present: ${result.student.name} (${result.student.roll})`,body:`Block #${result.receipt.block_number} · Transaction ${short(result.receipt.tx_hash,24)}`},true);toast('Attendance recorded on blockchain ✓');await loadRoster();});
 async function loadReports(){
   const [sessions]=await Promise.all([api('/api/sessions')]);
   const prev=$('filterSession').value;
