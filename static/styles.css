@@ -20,3 +20,16 @@
 .classroom-roster td{vertical-align:middle}
 @media(max-width:1000px){.roster-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.roster-head{align-items:flex-start;flex-direction:column}}
 @media(max-width:480px){.roster-stats>div{padding:12px}.roster-stats strong{font-size:24px}.classroom-roster{margin-top:16px}}
+
+@media(max-width:640px){
+  .classroom-roster .table-scroll{overflow:visible}
+  .classroom-roster table,.classroom-roster tbody,.classroom-roster tr,.classroom-roster td{display:block;width:100%;min-width:0}
+  .classroom-roster thead{display:none}
+  .classroom-roster tbody{padding:0 12px 12px}
+  .classroom-roster tbody tr{padding:12px 14px;margin-top:10px;border:1px solid #29425c;border-radius:11px;background:#0e2135;white-space:normal}
+  .classroom-roster tbody td{padding:7px 0;white-space:normal;border:0;overflow-wrap:anywhere}
+  .classroom-roster tbody td:first-child{font-size:14px;border-bottom:1px solid #29425c;padding-bottom:12px;margin-bottom:5px}
+  .classroom-roster tbody td:nth-child(2):before{content:'FACE ENROLLED · ';font-size:9px;letter-spacing:.08em;color:#8fa7bc}
+  .classroom-roster tbody td:nth-child(4):before{content:'METHOD · ';font-size:9px;letter-spacing:.08em;color:#8fa7bc}
+  .classroom-roster tbody td:nth-child(5):before{content:'LEDGER · ';font-size:9px;letter-spacing:.08em;color:#8fa7bc}
+}
