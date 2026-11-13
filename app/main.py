@@ -169,6 +169,43 @@ def delete_student(student_id: str, session=Depends(auth)):
 def sessions(session=Depends(auth)):
     return db.get_sessions()
 
+@app.get('/api/sessions/{session_id}/roster')
+def session_roster(session_id: str, faculty=Depends(auth)):
+    """Faculty-only ledger-derived attendance register for one class.
+
+    No student images or biometric descriptors are returned. A flagged mark is
+    not counted as present, and a learner is not presumed absent until the
+    teacher closes the class.
+    """
+    target = next((s for s in db.get_sessions() if s['id'] == session_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail='Class session was not found')
+    marks = service.attendance_report(session_id)
+    records_by_student = {row['student_id']: row for row in reversed(marks) if row.get('student_id')}
+    students = db.get_students()
+    roster = []
+    for student in students:
+        record = records_by_student.get(student['id'])
+        if record and record['status'] == 'Present':
+            status = 'present'
+        elif record:
+            status = 'flagged'
+        else:
+            status = 'not_marked' if target['closed_at'] else 'pending'
+        roster.append({
+            'id': student['id'], 'name': student['name'], 'roll': student['roll'],
+            'biometric_enrolled': student['templates'] > 0,
+            'status': status,
+            'method': record['method'] if record else None,
+            'block_number': record['block_number'] if record else None,
+            'tx_hash': record['tx_hash'] if record else None,
+            'timestamp': record['timestamp'] if record else None
+        })
+    present = sum(row['status'] == 'present' for row in roster)
+    return {'session': target, 'students': roster, 'total': len(roster),
+            'present': present, 'remaining': len(roster) - present,
+            'coverage_percent': round(present * 100 / len(roster)) if roster else 0}
+
 @app.post('/api/sessions')
 def create_session(payload: SessionNew, session=Depends(auth)):
     return service.create_session(payload.title, payload.course)
