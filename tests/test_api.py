@@ -12,6 +12,7 @@ def test_end_to_end_api_flow(monkeypatch):
     with TestClient(app) as client:
         assert client.get('/').status_code == 200
         assert client.get('/api/students').status_code == 401
+        assert client.get('/api/sessions/unknown/roster').status_code == 401
         assert client.post('/api/auth/login',json={'password':'wrong'}).status_code == 401
         login=client.post('/api/auth/login',json={'password':'correct-strong-password'})
         assert login.status_code==200
@@ -27,11 +28,19 @@ def test_end_to_end_api_flow(monkeypatch):
         session=client.post('/api/sessions',json={'title':'Blockchain Lab','course':'FBT101'})
         assert session.status_code==200,session.text
         session_id=session.json()['id']
+        roster=client.get(f'/api/sessions/{session_id}/roster')
+        assert roster.status_code==200 and roster.json()['present']==0
+        assert roster.json()['students'][0]['status']=='pending'
+        assert client.get('/api/sessions/unknown/roster').status_code==404
         scan=client.post('/api/recognize',json={'photo':'photo 4'})
         assert scan.json()['recognized'] is True
         mark=client.post(f'/api/sessions/{session_id}/mark',json={'photo':'photo 5'})
         assert mark.status_code==200,mark.text
         assert mark.json()['receipt']['tx_hash']
+        roster=client.get(f'/api/sessions/{session_id}/roster').json()
+        assert roster['present']==1 and roster['coverage_percent']==100
+        assert roster['students'][0]['method']=='Face scan'
+        assert roster['students'][0]['tx_hash']
         duplicate=client.post(f'/api/sessions/{session_id}/mark',json={'photo':'photo 6'})
         assert duplicate.status_code==409
         report=client.get('/api/attendance')
@@ -43,6 +52,7 @@ def test_end_to_end_api_flow(monkeypatch):
                                                                   'reason':'Testing correction'})
         assert flag.status_code==200,flag.text
         assert client.get('/api/attendance').json()[0]['status']=='Flagged / correction'
+        assert client.get(f'/api/sessions/{session_id}/roster').json()['students'][0]['status']=='flagged'
         close=client.post(f'/api/sessions/{session_id}/close')
         assert close.status_code==200,close.text
         assert client.get('/api/ledger/verify').json()['valid'] is True
