@@ -33,3 +33,6 @@
   .classroom-roster tbody td:nth-child(4):before{content:'METHOD · ';font-size:9px;letter-spacing:.08em;color:#8fa7bc}
   .classroom-roster tbody td:nth-child(5):before{content:'LEDGER · ';font-size:9px;letter-spacing:.08em;color:#8fa7bc}
 }
+
+/* Student classroom join link */
+.join-panel{margin:14px 0 18px}.join-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:15px 0}.join-row>div{margin-right:auto}.join-row small{display:block;color:#a7c6e0;font-size:10px;letter-spacing:1.2px}.join-row strong{display:block;color:white;font-size:20px;letter-spacing:2px}.join-row a{display:inline-flex;text-decoration:none;align-items:center;min-height:40px}.join-panel>small{font-size:11px;color:#91b9ce}@media(max-width:650px){.join-row>div{width:100%}}

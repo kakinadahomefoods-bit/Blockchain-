@@ -139,3 +139,27 @@ Use consenting test participants. Do not use real students' biometric data witho
 **Validation:** 12 automated tests currently pass in the supplied environment, including duplicate rejection, manual override, API authentication, CSV generation, tamper diagnostics and corrections. JavaScript parses successfully. The Windows bootstrapper, Solidity deployment and actual laptop webcam have **not** been executed in this environment; they must be verified on your computer. Do not claim a measured recognition accuracy without collecting and evaluating volunteer data.
 
 **License:** MIT. This is a complete, modifiable **mini-project prototype**; not production-certified software.
+
+## Student join flow — full local application
+
+Faculty opens **Take attendance LIVE**, creates or selects a class and copies its
+12-character student code / join link. Student opens `/join` on the **same
+reachable backend**, enters the code and their registered roll number, and
+submits a webcam image or consented photo. The server confirms that the matched
+biometric identity belongs to that roll before marking attendance through
+the configured real Ganache/Solidity contract (or signed local fallback).
+The student receives a transaction receipt. The teacher refreshes the roster.
+Duplicate attendance and submissions after the session closes are rejected.
+
+The learner must first be enrolled with three consented face samples by faculty;
+manual-only registrations can only receive a faculty-supervised override.
+Codes for existing sessions are derived from the faculty's local HMAC secret and
+are available when the class is selected after updating.
+
+**Important**: The default server binds to 127.0.0.1, which is inaccessible to
+students on other devices. Sharing a localhost link on a phone does not work;
+cross-device use requires a secure reachable HTTPS deployment/tunnel and a
+backend security review. Do not publish your local Ganache RPC or faculty
+password. The Vercel hosted site remains a browser-only demo; no shared database
+or biometric processing is running there. The Haar/LBP classroom face matcher
+does not perform anti-spoofing/liveness checks.

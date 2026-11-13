@@ -77,6 +77,43 @@ class Correction(BaseModel):
     student_id: str
     reason: str
 
+class StudentJoinLookup(BaseModel):
+    code: str = Field(min_length=12, max_length=12)
+
+class StudentJoinAttendance(BaseModel):
+    code: str = Field(min_length=12, max_length=12)
+    roll: str = Field(min_length=2, max_length=24)
+    photo: str = Field(min_length=100, max_length=5_600_000)
+
+_join_attempts = defaultdict(deque)
+_join_lock = threading.RLock()
+
+def _class_join_code(session_id):
+    """Stable 12-hex invitation code tied to faculty's existing HMAC key."""
+    key = bytes.fromhex(require_secret('HMAC_KEY'))
+    return hmac.new(key, ('student-join:' + session_id).encode(), hashlib.sha256).hexdigest()[:12].upper()
+
+def _class_from_join_code(code):
+    value = str(code or '').strip().upper()
+    if len(value) != 12 or any(c not in '0123456789ABCDEF' for c in value):
+        return None
+    for course in db.get_sessions():
+        if hmac.compare_digest(_class_join_code(course['id']), value):
+            return course
+    return None
+
+def _limit_student_join(request: Request, maximum=25):
+    """Local prototype throttle. Use a distributed limiter for cloud hosting."""
+    ip = request.client.host if request.client else 'unknown'
+    now = time.monotonic()
+    with _join_lock:
+        recent = _join_attempts[ip]
+        while recent and recent[0] < now - 600:
+            recent.popleft()
+        if len(recent) >= maximum:
+            raise HTTPException(429, 'Too many attempts. Contact faculty.')
+        recent.append(now)
+
 def _auth_from_cookie(request):
     cookie = request.cookies.get('blockattend_sid', '')
     with _auth_lock:
@@ -106,9 +143,49 @@ def homepage():
 
 @app.get('/static/{filename}')
 def static_file(filename: str):
-    if filename not in ('app.js','styles.css','logo.svg'):
+    if filename not in ('app.js','styles.css','logo.svg','student-join.js','student-join.css'):
         raise HTTPException(404)
     return FileResponse(ROOT / 'static' / filename)
+
+@app.get('/join')
+def student_join():
+    return FileResponse(ROOT / 'static' / 'join.html', media_type='text/html')
+
+@app.post('/api/join/lookup')
+def student_lookup(payload: StudentJoinLookup, request: Request):
+    _limit_student_join(request, 40)
+    course = _class_from_join_code(payload.code)
+    if not course:
+        raise HTTPException(404, 'Invalid class code. Ask your teacher for a valid code.')
+    return {'title': course['title'], 'course': course['course'],
+            'open': not bool(course['closed_at'])}
+
+@app.post('/api/join/attend')
+def student_attend(payload: StudentJoinAttendance, request: Request):
+    _limit_student_join(request, 25)
+    course = _class_from_join_code(payload.code)
+    if not course or course['closed_at']:
+        raise HTTPException(400, 'Class not available or already closed.')
+    claimed = next((row for row in db.get_students() if row['roll'].upper()==payload.roll.strip().upper()), None)
+    if not claimed or claimed['templates'] < 1:
+        raise HTTPException(400, 'Identity verification failed. Ask faculty to enroll your face first.')
+    try:
+        match = service.recognize_student(payload.photo)
+        if not match.get('recognized') or match['student']['id'] != claimed['id']:
+            raise ValueError('Face did not match the requested student')
+    except (service.BadRequest, ValueError):
+        raise HTTPException(400, 'Identity verification unsuccessful. Try better lighting or ask faculty to verify manually.')
+    try:
+        marked = service.mark_attendance(course['id'], payload.photo)
+    except service.BadRequest as exc:
+        raise HTTPException(400, str(exc))
+    if marked['student']['id'] != claimed['id']:
+        raise HTTPException(409, 'Identity did not match consistently.')
+    return {'marked': True, 'student': {'name': claimed['name'], 'roll': claimed['roll']},
+            'session': course['title'],
+            'block_number': marked['receipt']['block_number'],
+            'tx_hash': marked['receipt']['tx_hash'], 'method':'FACE_MATCH',
+            'note':'Academic prototype: face liveness is not verified.'}
 
 @app.get('/api/auth/status')
 def auth_status(request: Request):
@@ -167,7 +244,7 @@ def delete_student(student_id: str, session=Depends(auth)):
 
 @app.get('/api/sessions')
 def sessions(session=Depends(auth)):
-    return db.get_sessions()
+    return [{**row, 'join_code': _class_join_code(row['id'])} for row in db.get_sessions()]
 
 @app.get('/api/sessions/{session_id}/roster')
 def session_roster(session_id: str, faculty=Depends(auth)):
@@ -208,7 +285,8 @@ def session_roster(session_id: str, faculty=Depends(auth)):
 
 @app.post('/api/sessions')
 def create_session(payload: SessionNew, session=Depends(auth)):
-    return service.create_session(payload.title, payload.course)
+    created = service.create_session(payload.title, payload.course)
+    return {**created, 'join_code': _class_join_code(created['id'])}
 
 @app.post('/api/sessions/{session_id}/close')
 def close_session(session_id: str, session=Depends(auth)):

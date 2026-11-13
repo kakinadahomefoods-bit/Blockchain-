@@ -5,6 +5,7 @@ let currentCamera = null;
 let samples = [];
 let scanPhoto = null;
 let currentPage = 'dashboard';
+let sessionChoices = [];
 const $ = id => document.getElementById(id);
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short = (s, n=15) => s && s.length>n ? `${s.slice(0,n)}…` : (s || '—');
@@ -124,15 +125,30 @@ async function loadRoster(){
     toast('Confirm the reason and click “Mark present manually · audited”.');
   });
 }
+function showStudentJoinLink(){
+  const active=sessionChoices.find(s=>s.id===$('sessionSelect').value);
+  $('shareCode').textContent=active?.join_code || 'Select a class';
+  $('copyJoinLink').disabled=!active?.join_code;
+  $('openJoinDemo').href=active?.join_code?new URL('/join?code='+encodeURIComponent(active.join_code),location.href).href:'/join';
+  $('shareHelp').textContent=active?'This student link must point to the same running local server. A localhost URL will not work on another phone.':'Create or select an open class first.';
+}
+$('copyJoinLink').onclick=()=>run(async()=>{
+  const active=sessionChoices.find(s=>s.id===$('sessionSelect').value);
+  if(!active)throw Error('Select an open class first');
+  const url=new URL('/join?code='+encodeURIComponent(active.join_code),location.href).href;
+  if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(url);toast('Student join link copied');}
+  else prompt('Copy the student join link:',url);
+});
 async function loadSessionMenus(){
-  const sessions=await api('/api/sessions');const open=sessions.filter(x=>!x.closed_at);
+  const sessions=await api('/api/sessions');sessionChoices=sessions;const open=sessions.filter(x=>!x.closed_at);
   await loadStudents();const prev=$('sessionSelect').value;$('sessionSelect').innerHTML='<option value="">Choose active session</option>'+open.map(s=>`<option value="${escapeHTML(s.id)}">${escapeHTML(s.title)} · ${escapeHTML(s.course)}</option>`).join('');
   if(open.some(s=>s.id===prev))$('sessionSelect').value=prev;
   else if(open.length)$('sessionSelect').value=open[0].id;
+  showStudentJoinLink();
   await loadRoster();
 }
 $('openSessionModal').onclick=()=>{$('sessionTitle').focus();$('sessionTitle').scrollIntoView({behavior:'smooth',block:'center'})};
-$('createSession').onclick=()=>run(async()=>{const payload={title:$('sessionTitle').value,course:$('sessionCourse').value};const x=await api('/api/sessions','POST',payload);$('sessionTitle').value='';$('sessionCourse').value='';await loadSessionMenus();$('sessionSelect').value=x.id;toast('Class session created on blockchain');});
+$('createSession').onclick=()=>run(async()=>{const payload={title:$('sessionTitle').value,course:$('sessionCourse').value};const x=await api('/api/sessions','POST',payload);$('sessionTitle').value='';$('sessionCourse').value='';await loadSessionMenus();$('sessionSelect').value=x.id;showStudentJoinLink();await loadRoster();toast('Class created. Copy the join code to invite students.');});
 $('closeSession').onclick=()=>run(async()=>{const id=$('sessionSelect').value;if(!id)throw Error('Choose an active session');if(!confirm('Close this session? New attendance and corrections will be blocked on-chain.'))return;await api(`/api/sessions/${q(id)}/close`,'POST');await loadSessionMenus();toast('Session closed on blockchain');});
 $('manualMark').onclick=()=>run(async()=>{const id=$('sessionSelect').value;
   if(!id)throw Error('Create or select an active session first');
@@ -144,7 +160,7 @@ $('manualMark').onclick=()=>run(async()=>{const id=$('sessionSelect').value;
   scanMessage({title:`Faculty override: ${result.student.name}`,body:`Recorded in block #${result.receipt.block_number} (not face-verified).`},true);
   $('manualReason').value='';toast('Faculty override recorded transparently on-chain');await loadRoster();
 });
-$('sessionSelect').onchange=()=>run(loadRoster);
+$('sessionSelect').onchange=()=>run(async()=>{showStudentJoinLink();await loadRoster();});
 $('refreshRoster').onclick=()=>run(loadRoster);
 $('scanCamera').onclick=()=>run(()=>startCamera('scan'));
 $('scanUpload').onchange=e=>run(async()=>{if(!e.target.files.length)return;scanPhoto=await fileToData(e.target.files[0]);$('scanCamNotice').textContent=`Selected: ${e.target.files[0].name}. Use Check face or Scan & mark.`;toast('Photo selected');e.target.value='';});
