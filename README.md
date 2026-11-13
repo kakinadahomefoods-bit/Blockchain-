@@ -163,3 +163,33 @@ backend security review. Do not publish your local Ganache RPC or faculty
 password. The Vercel hosted site remains a browser-only demo; no shared database
 or biometric processing is running there. The Haar/LBP classroom face matcher
 does not perform anti-spoofing/liveness checks.
+
+## Faculty-issued student login and face-verified attendance
+
+The **complete local application** has separate student authentication at
+`http://127.0.0.1:8000/join`. Faculty signs in, enrols a consenting student
+with three face samples, clicks **Create student login** beside that student's
+record, and privately shares the one-time password and roll number.
+
+Faculty creates an open class in **Take attendance LIVE** and shares the
+12-character join code. Students sign in with their roll number and password,
+enter the class code, consent to face-photo processing, and submit a webcam
+frame or photo. The backend checks the **signed-in account identity** against
+the facial template before creating one ledger attendance transaction.
+Closed classes and duplicate marks are rejected; success displays a
+block number and transaction hash. Faculty can reset a student account,
+which invalidates previous passwords and student sessions. Students can
+change their passwords (12+ characters).
+
+Security: salted PBKDF2-HMAC-SHA256 credential hashes in the local SQLite
+database, HttpOnly SameSite cookies, authenticated CSRF-protected endpoints,
+and local login rate limiting. Webcam matching is a classroom prototype
+without spoof/liveness detection and should not be used for grading without
+manual oversight. Never share the generated `data/` files, private keys,
+login passwords, or biometric templates.
+
+**Online limitation:** Vercel hosts a browser-only preview and does not
+provide this Python/OpenCV/Ganache backend or a shared database. Student
+phones require the backend hosted behind HTTPS with persistent storage and
+proper biometric data security. `127.0.0.1` is only accessible on the
+computer running the local server.

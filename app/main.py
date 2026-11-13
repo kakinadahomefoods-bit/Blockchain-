@@ -82,11 +82,61 @@ class StudentJoinLookup(BaseModel):
 
 class StudentJoinAttendance(BaseModel):
     code: str = Field(min_length=12, max_length=12)
-    roll: str = Field(min_length=2, max_length=24)
     photo: str = Field(min_length=100, max_length=5_600_000)
+
+class StudentLoginRequest(BaseModel):
+    roll: str = Field(min_length=2, max_length=24)
+    password: str = Field(min_length=1, max_length=256)
+
+class StudentChangePassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=12, max_length=256)
 
 _join_attempts = defaultdict(deque)
 _join_lock = threading.RLock()
+_student_sessions = {}
+_student_attempts = defaultdict(deque)
+_student_auth_lock = threading.RLock()
+_STUDENT_SESSION_AGE = 60 * 60 * 4
+_PASSWORD_ROUNDS = 310_000
+
+def _password_digest(password, salt, rounds=_PASSWORD_ROUNDS):
+    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), bytes.fromhex(salt), rounds).hex()
+
+def _student_session(request):
+    sid=request.cookies.get('blockattend_student_sid','')
+    with _student_auth_lock:
+        session=_student_sessions.get(sid)
+        if not session or session['expires']<time.time():
+            _student_sessions.pop(sid,None)
+            return None
+    if not db.get_student_login_by_id(session['student_id']):
+        with _student_auth_lock:
+            _student_sessions.pop(sid,None)
+        return None
+    return session
+
+def student_auth(request: Request):
+    session=_student_session(request)
+    if not session:
+        raise HTTPException(401,'Student login required')
+    if request.method not in ('GET','HEAD'):
+        if not hmac.compare_digest(request.headers.get('X-CSRF-Token',''),session['csrf']):
+            raise HTTPException(403,'Invalid student CSRF token')
+    return session
+
+def _limit_student_login(request):
+    addr=request.client.host if request.client else 'unknown'
+    now=time.monotonic()
+    with _student_auth_lock:
+        attempts=_student_attempts[addr]
+        while attempts and attempts[0]<now-600:
+            attempts.popleft()
+        if len(attempts)>=12:
+            raise HTTPException(429,'Too many login attempts. Try again later.')
+        attempts.append(now)
+        return addr
+
 
 def _class_join_code(session_id):
     """Stable 12-hex invitation code tied to faculty's existing HMAC key."""
@@ -151,40 +201,87 @@ def static_file(filename: str):
 def student_join():
     return FileResponse(ROOT / 'static' / 'join.html', media_type='text/html')
 
+@app.post('/api/student/login')
+def login_student(payload: StudentLoginRequest, request: Request, response: Response):
+    addr=_limit_student_login(request)
+    account=db.student_login_record(payload.roll)
+    salt=account['password_salt'] if account else '0'*32
+    rounds=account['password_rounds'] if account else _PASSWORD_ROUNDS
+    hashed=_password_digest(payload.password,salt,rounds)
+    if not account or not hmac.compare_digest(hashed,account['password_hash']):
+        raise HTTPException(401,'Invalid student roll number or password')
+    with _student_auth_lock:
+        _student_attempts[addr].clear()
+        sid=secrets.token_urlsafe(32)
+        csrf=secrets.token_urlsafe(32)
+        _student_sessions[sid]={'student_id':account['id'],'csrf':csrf,'expires':time.time()+_STUDENT_SESSION_AGE}
+    response.set_cookie('blockattend_student_sid',sid,httponly=True,samesite='strict',
+                        secure=(env('COOKIE_SECURE')=='true' or request.url.scheme=='https'),
+                        max_age=_STUDENT_SESSION_AGE,path='/')
+    return {'authenticated':True,'csrf':csrf,'student':{
+        'name':account['name'],'roll':account['roll'],
+        'biometric_enrolled':bool(account['biometric_enrolled'])}}
+
+@app.get('/api/student/status')
+def student_status(request: Request):
+    session=_student_session(request)
+    if not session:return {'authenticated':False}
+    student=db.get_student_login_by_id(session['student_id'])
+    return {'authenticated':True,'csrf':session['csrf'],'student':{
+        'name':student['name'],'roll':student['roll'],
+        'biometric_enrolled':bool(student['biometric_enrolled'])}}
+
+@app.post('/api/student/logout')
+def student_logout(request: Request,response: Response,student=Depends(student_auth)):
+    with _student_auth_lock:
+        _student_sessions.pop(request.cookies.get('blockattend_student_sid',''),None)
+    response.delete_cookie('blockattend_student_sid',path='/')
+    return {'ok':True}
+
+@app.post('/api/student/change-password')
+def student_change_password(payload: StudentChangePassword,request: Request,
+                            response: Response,student=Depends(student_auth)):
+    account=db.student_login_record(db.get_student_login_by_id(student['student_id'])['roll'])
+    current=_password_digest(payload.current_password,account['password_salt'],account['password_rounds'])
+    if not hmac.compare_digest(current,account['password_hash']):
+        raise HTTPException(401,'Current student password is incorrect')
+    if hmac.compare_digest(payload.current_password,payload.new_password):
+        raise HTTPException(400,'Choose a different password')
+    salt=secrets.token_hex(16)
+    if not db.put_student_login(student['student_id'],salt,_password_digest(payload.new_password,salt),_PASSWORD_ROUNDS):
+        raise HTTPException(404,'Student account not found')
+    with _student_auth_lock:
+        for sid,value in list(_student_sessions.items()):
+            if value['student_id']==student['student_id']:
+                _student_sessions.pop(sid,None)
+    response.delete_cookie('blockattend_student_sid',path='/')
+    return {'ok':True,'relogin_required':True}
+
 @app.post('/api/join/lookup')
-def student_lookup(payload: StudentJoinLookup, request: Request):
-    _limit_student_join(request, 40)
-    course = _class_from_join_code(payload.code)
-    if not course:
-        raise HTTPException(404, 'Invalid class code. Ask your teacher for a valid code.')
-    return {'title': course['title'], 'course': course['course'],
-            'open': not bool(course['closed_at'])}
+def student_lookup(payload: StudentJoinLookup, request: Request, student=Depends(student_auth)):
+    _limit_student_join(request,40)
+    course=_class_from_join_code(payload.code)
+    if not course:raise HTTPException(404,'Invalid class code. Ask your teacher for a valid code.')
+    return {'title':course['title'],'course':course['course'],'open':not bool(course['closed_at'])}
 
 @app.post('/api/join/attend')
-def student_attend(payload: StudentJoinAttendance, request: Request):
-    _limit_student_join(request, 25)
-    course = _class_from_join_code(payload.code)
+def student_attend(payload: StudentJoinAttendance,request: Request,student=Depends(student_auth)):
+    _limit_student_join(request,25)
+    course=_class_from_join_code(payload.code)
     if not course or course['closed_at']:
-        raise HTTPException(400, 'Class not available or already closed.')
-    claimed = next((row for row in db.get_students() if row['roll'].upper()==payload.roll.strip().upper()), None)
-    if not claimed or claimed['templates'] < 1:
-        raise HTTPException(400, 'Identity verification failed. Ask faculty to enroll your face first.')
+        raise HTTPException(400,'Class not available or already closed.')
+    claimed=db.get_student_login_by_id(student['student_id'])
+    if not claimed or not claimed['biometric_enrolled']:
+        raise HTTPException(400,'Your account has no enrolled face template. Ask faculty for help.')
     try:
-        match = service.recognize_student(payload.photo)
-        if not match.get('recognized') or match['student']['id'] != claimed['id']:
-            raise ValueError('Face did not match the requested student')
-    except (service.BadRequest, ValueError):
-        raise HTTPException(400, 'Identity verification unsuccessful. Try better lighting or ask faculty to verify manually.')
-    try:
-        marked = service.mark_attendance(course['id'], payload.photo)
-    except service.BadRequest as exc:
-        raise HTTPException(400, str(exc))
-    if marked['student']['id'] != claimed['id']:
-        raise HTTPException(409, 'Identity did not match consistently.')
-    return {'marked': True, 'student': {'name': claimed['name'], 'roll': claimed['roll']},
-            'session': course['title'],
-            'block_number': marked['receipt']['block_number'],
-            'tx_hash': marked['receipt']['tx_hash'], 'method':'FACE_MATCH',
+        marked=service.mark_attendance(course['id'],payload.photo,expected_student_id=student['student_id'])
+    except (service.BadRequest,ValueError):
+        raise HTTPException(400,'Face verification failed or was uncertain. Ask faculty for review.')
+    except LedgerError as exc:
+        raise HTTPException(409,str(exc))
+    return {'marked':True,'student':{'name':claimed['name'],'roll':claimed['roll']},
+            'session':course['title'],'block_number':marked['receipt']['block_number'],
+            'tx_hash':marked['receipt']['tx_hash'],'method':'FACE_MATCH',
             'note':'Academic prototype: face liveness is not verified.'}
 
 @app.get('/api/auth/status')
@@ -237,6 +334,21 @@ def enrol(payload: Enrollment, session=Depends(auth)):
 @app.post('/api/students/manual')
 def enrol_manual(payload: ManualStudentNew, session=Depends(auth)):
     return service.enrol_without_biometrics(payload.name, payload.roll)
+
+@app.post('/api/students/{student_id}/credentials')
+def provision_student_credentials(student_id: str,faculty=Depends(auth)):
+    temporary_password=secrets.token_urlsafe(20)
+    salt=secrets.token_hex(16)
+    hashed=_password_digest(temporary_password,salt)
+    if not db.put_student_login(student_id,salt,hashed,_PASSWORD_ROUNDS):
+        raise HTTPException(404,'Student not found')
+    with _student_auth_lock:
+        for sid,value in list(_student_sessions.items()):
+            if value['student_id']==student_id:
+                _student_sessions.pop(sid,None)
+    st=db.get_student_login_by_id(student_id)
+    return {'roll':st['roll'],'temporary_password':temporary_password,
+            'message':'Show the password privately to this student only. It cannot be recovered later.'}
 
 @app.delete('/api/students/{student_id}')
 def delete_student(student_id: str, session=Depends(auth)):

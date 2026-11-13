@@ -113,7 +113,7 @@ def recognize_student(photo):
         return {'recognized': True, 'student': dict(row), 'distance': round(ranked[0][1], 4),
                 'message': 'Face matched. This is not a liveness check.'}
 
-def mark_attendance(sid, photo):
+def mark_attendance(sid, photo, expected_student_id=None):
     with db.connect() as conn:
         session = conn.execute('SELECT * FROM class_sessions WHERE id=?', (sid,)).fetchone()
         if not session:
@@ -124,6 +124,8 @@ def mark_attendance(sid, photo):
     if not result['recognized']:
         raise BadRequest('Not marked: face is unknown or recognition is uncertain')
     student = result['student']
+    if expected_student_id is not None and student['id'] != expected_student_id:
+        raise BadRequest('Face did not match the signed-in student account')
     chain = ledger_checked()
     receipt = chain.mark_attendance(token('session', sid), token('student', student['id']))
     return {'marked': True, 'student': student, 'receipt': receipt, 'distance': result['distance']}

@@ -58,7 +58,15 @@ async function loadStudents(){
   const students=await api('/api/students');
   const manualSelect=$('manualStudent');if(manualSelect){const prev=manualSelect.value;manualSelect.innerHTML='<option value="">Select student</option>'+students.map(s=>`<option value="${escapeHTML(s.id)}">${escapeHTML(s.roll)} · ${escapeHTML(s.name)}</option>`).join('');if(students.some(s=>s.id===prev))manualSelect.value=prev;}
   $('enrolledCount').textContent=`${students.length} student${students.length===1?'':'s'}`;
-  $('studentsList').innerHTML=students.length?students.map(s=>`<div class="student-row"><div class="row-main"><span class="initials">${escapeHTML(s.name.slice(0,2).toUpperCase())}</span><span><strong>${escapeHTML(s.name)}</strong><small>${escapeHTML(s.roll)} · ${s.templates?'Face enrolled':'Manual only'}</small></span></div><button class="delete-btn" data-delete="${escapeHTML(s.id)}">Delete</button></div>`).join(''):'<div class="empty">No students enrolled yet.</div>';
+  $('studentsList').innerHTML=students.length?students.map(s=>`<div class="student-row"><div class="row-main"><span class="initials">${escapeHTML(s.name.slice(0,2).toUpperCase())}</span><span><strong>${escapeHTML(s.name)}</strong><small>${escapeHTML(s.roll)} · ${s.templates?'Face enrolled':'Manual only'}</small></span></div><div class="student-account-actions"><button class="secondary-btn small" data-credentials="${escapeHTML(s.id)}">${s.login_enabled?'Reset student login':'Create student login'}</button><button class="delete-btn" data-delete="${escapeHTML(s.id)}">Delete</button></div></div>`).join(''):'<div class="empty">No students enrolled yet.</div>';
+  document.querySelectorAll('[data-credentials]').forEach(btn=>btn.onclick=()=>run(async()=>{
+    if(!confirm('Create a fresh student password? Previous passwords and active student sessions will be revoked.'))return;
+    const x=await api('/api/students/'+q(btn.dataset.credentials)+'/credentials','POST');
+    $('createdLoginRoll').textContent=x.roll;
+    $('createdLoginPassword').textContent=x.temporary_password;
+    $('studentCredentialModal').classList.remove('hidden');
+    await loadStudents();
+  }));
   document.querySelectorAll('[data-delete]').forEach(btn=>btn.onclick=()=>run(async()=>{if(!confirm('Delete this student and their local biometric templates? Historical blockchain tokens remain.'))return;await api(`/api/students/${btn.dataset.delete}`,'DELETE');toast('Student removed from local database');await loadStudents();}));
 }
 async function startCamera(page){
@@ -190,3 +198,14 @@ async function loadLedger(){const data=await api('/api/ledger');updateBackend(da
 }
 $('verifyLedger').onclick=()=>run(async()=>{const v=await api('/api/ledger/verify');await loadLedger();toast(v.valid?'Blockchain integrity verified ✓':'Integrity verification failed',!v.valid);});
 init();
+
+$('hideStudentCredential').addEventListener('click',()=>{
+ $('studentCredentialModal').classList.add('hidden');
+ $('createdLoginRoll').textContent='';
+ $('createdLoginPassword').textContent='';
+});
+$('copyStudentCredential').addEventListener('click',()=>run(async()=>{
+ const details='BlockAttend Student Login\nRoll: '+$('createdLoginRoll').textContent+'\nPassword: '+$('createdLoginPassword').textContent+'\nJoin URL: '+new URL('/join',location.href).href;
+ await navigator.clipboard.writeText(details);
+ toast('Student login details copied. Share privately, never in a group chat.');
+}));
